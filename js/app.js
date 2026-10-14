@@ -204,8 +204,12 @@
     shots: [],          // the only thing that is saved
     result: 'make',     // the Make/Miss toggle - deliberately NOT saved
     heatmap: false,
+    showMisses: true,
     storageWorks: true
   };
+
+  /* None of the three above are saved. The rule is: the session is what
+     persists, how you are currently LOOKING at it resets. */
 
   function makeShot(x, y, zone, made, source) {
     return {
@@ -634,6 +638,12 @@
 
     for (var i = 0; i < state.shots.length; i++) {
       var shot = state.shots[i];
+
+      /* Hiding misses only changes what is DRAWN. The misses are still in the
+         session and still counted in every percentage - this is a way of
+         looking at the chart, not a way of editing it. */
+      if (!shot.made && !state.showMisses) continue;
+
       var cx = px(shot.x);
       var cy = py(shot.y);
 
@@ -734,6 +744,8 @@
     statsTable.hidden = !hasShots;
     emptyState.hidden = hasShots;
 
+    renderZoneSummary(stats);
+
     if (!hasShots) {
       statsBody.innerHTML = '';
       statsFoot.innerHTML = '';
@@ -795,6 +807,69 @@
     return td;
   }
 
+  /* -------------------------------------------------------------------------
+     Hottest and coldest zone.
+
+     The whole point of the app, from my plan, is seeing hot and cold spots.
+     Up to now the reader had to work that out of the table themselves.
+
+     Two rules keep it honest:
+       * It needs at least TWO zones with attempts. One zone cannot be both
+         the best and the worst.
+       * It always prints makes and attempts next to the percentage, so a zone
+         that is "hottest" off a single lucky shot cannot hide how thin that is.
+     ------------------------------------------------------------------------- */
+
+  var summaryEl = document.getElementById('zone-summary');
+
+  function renderZoneSummary(stats) {
+    var played = ZONES.filter(function (z) { return stats[z.id].attempts > 0; });
+
+    if (played.length < 2) {
+      summaryEl.hidden = true;
+      summaryEl.textContent = '';
+      return;
+    }
+
+    var ranked = played.slice().sort(function (a, b) {
+      return (stats[b.id].makes / stats[b.id].attempts) -
+             (stats[a.id].makes / stats[a.id].attempts);
+    });
+
+    var hot = ranked[0];
+    var cold = ranked[ranked.length - 1];
+    var hotPct = stats[hot.id].makes / stats[hot.id].attempts;
+    var coldPct = stats[cold.id].makes / stats[cold.id].attempts;
+
+    summaryEl.textContent = '';
+    summaryEl.hidden = false;
+
+    // Everything level: naming a best and a worst would be inventing a gap.
+    if (hotPct === coldPct) {
+      summaryEl.textContent = 'Even so far. Every zone you have shot from is at ' +
+        Math.round(hotPct * 100) + '%.';
+      return;
+    }
+
+    appendZonePart(summaryEl, 'Hottest:', hot, stats[hot.id]);
+
+    var sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.textContent = ' · ';
+    summaryEl.appendChild(sep);
+
+    appendZonePart(summaryEl, 'Coldest:', cold, stats[cold.id]);
+  }
+
+  function appendZonePart(parent, lead, zone, s) {
+    var strong = document.createElement('strong');
+    strong.textContent = lead + ' ' + zone.label;
+    parent.appendChild(strong);
+    parent.appendChild(document.createTextNode(
+      ' ' + s.makes + '/' + s.attempts + ' (' + pctText(s) + ') '
+    ));
+  }
+
   /* The canvas is a picture as far as a screen reader is concerned, so its
      description is kept in step with what it shows. The full detail lives in
      the stats table, which is real markup. */
@@ -805,11 +880,18 @@
       return;
     }
 
+    var misses = stats.total.attempts - stats.total.makes;
+
     canvas.setAttribute('aria-label',
       'Basketball half court showing ' + state.shots.length + ' logged ' +
       (state.shots.length === 1 ? 'shot' : 'shots') + '. Overall ' +
       stats.total.makes + ' of ' + stats.total.attempts + ', ' +
-      pctText(stats.total) + '. Zone by zone numbers are in the stats table.');
+      pctText(stats.total) + '. ' +
+      (!state.showMisses && misses > 0
+        ? misses + (misses === 1 ? ' miss is' : ' misses are') +
+          ' hidden from the chart but still counted. '
+        : '') +
+      'Zone by zone numbers are in the stats table.');
   }
 
   /* =========================================================================
@@ -985,6 +1067,7 @@
   var logBtn     = document.getElementById('log-shot');
   var zoneSelect = document.getElementById('zone-select');
   var heatToggle = document.getElementById('heatmap');
+  var missesToggle = document.getElementById('show-misses');
 
   function refreshButtons() {
     var empty = state.shots.length === 0;
@@ -1045,6 +1128,14 @@
   heatToggle.addEventListener('change', function (event) {
     state.heatmap = event.target.checked;
     render();
+  });
+
+  missesToggle.addEventListener('change', function (event) {
+    state.showMisses = event.target.checked;
+    render();
+    setStatus(state.showMisses
+      ? 'Showing makes and misses.'
+      : 'Showing makes only. Your misses are still counted in every percentage.');
   });
 
   // ---- hover: name the zone before the click commits to it ----

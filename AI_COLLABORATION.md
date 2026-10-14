@@ -66,6 +66,22 @@ numbers are printed on every zone whenever the shading is on.
   what my sketch shows.
 - Add a light and dark mode toggle. That is not in my plan at all. I asked for it
   after seeing the page.
+- Add the "show misses" toggle. This one **was** in my plan, under Settings, as
+  something I might do later. It only changes what gets drawn. The misses are
+  still saved and still counted in every percentage, because hiding them is a way
+  of looking at the chart, not a way of editing it.
+- Add a hottest and coldest zone line under the table. My Purpose section says the
+  point is to see your hot and cold spots, and up to then you had to work that out
+  of the table yourself. It prints makes and attempts next to the percentage, so a
+  zone that is "hottest" off one lucky shot cannot hide how thin that is. If every
+  zone is level it says so instead of inventing a best and a worst.
+
+## Something I know is still wrong
+
+The heat map shades a zone purely on percentage, so 1 for 1 looks exactly as hot
+as 9 for 10. Claude flagged it and offered to fade out zones with only a few
+attempts. I left it, because I would rather talk about it on Friday than change
+one more thing right before the walkthrough.
 
 ## Things that got fixed after looking at it
 
@@ -113,6 +129,13 @@ the keyboard route, and the session surviving a real page reload.
 
 **The theme toggle: 21 checks, all passing.** All three options, the choice
 getting saved, and the choice surviving a reload.
+
+**The two late additions: 23 checks, all passing.** That the hottest and coldest
+line stays hidden until two zones have attempts, that a middle zone cannot become
+either end, and that a dead tie says "even so far" instead of picking one. For
+the misses toggle, the test counts the orange pixels on the canvas to prove the
+marks really left, and then checks that the attempts, the percentages and the
+saved session are all completely unchanged.
 
 ## What I still want to understand better
 

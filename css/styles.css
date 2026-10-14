@@ -508,6 +508,20 @@ select {
 .stats-table tr[data-empty="true"] td,
 .stats-table tr[data-empty="true"] th { color: var(--ink-faint); }
 
+/* The hottest / coldest line under the table. It always prints makes and
+   attempts beside the percentage, so a zone that is "hottest" off one lucky
+   shot cannot hide how little it is based on. */
+.zone-summary {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: .875rem;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+.zone-summary strong { color: var(--ink); }
+.zone-summary .sep { color: var(--ink-faint); padding: 0 4px; }
+
 /* --------------------------------------------------------------------------
    Footer
    -------------------------------------------------------------------------- */

@@ -116,6 +116,11 @@
           <input type="checkbox" id="heatmap">
           <label for="heatmap">Shade zones like a heat map</label>
         </div>
+
+        <div class="field field--check">
+          <input type="checkbox" id="show-misses" checked>
+          <label for="show-misses">Show misses on the court</label>
+        </div>
       </section>
 
       <!-- ================= The numbers ================= -->
@@ -139,6 +144,8 @@
           <tbody id="stats-body"></tbody>
           <tfoot id="stats-foot"></tfoot>
         </table>
+
+        <p id="zone-summary" class="zone-summary" hidden></p>
       </section>
 
     </main>

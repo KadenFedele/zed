@@ -1,0 +1,525 @@
+/* ===========================================================================
+   Shot Chart Tracker
+   ---------------------------------------------------------------------------
+   Colour is defined once as tokens on :root and re-stated for dark mode, so
+   every rule below is written against a ROLE (--ink, --make, --miss) rather
+   than a raw hex value.
+
+   The two mark colours (blue for a make, orange for a miss) were chosen
+   because they stay separable for colour-blind readers; on top of that each
+   mark also has its own SHAPE (filled dot vs X), so nothing in this app is
+   ever communicated by colour alone.
+   =========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  --surface:        #fcfcfb;   /* page background           */
+  --surface-raised: #ffffff;   /* cards, the court itself   */
+  --ink:            #1a1a19;   /* primary text, court lines */
+  --ink-muted:      #52514e;   /* secondary text            */
+  --ink-faint:      #76746e;   /* captions, hints           */
+  --border:         #dcdad4;
+  --border-strong:  #b4b1a8;
+
+  --make:           #2a78d6;   /* categorical slot 1 - blue   */
+  --miss:           #eb6834;   /* categorical slot 2 - orange */
+  --focus:          #2a78d6;
+
+  /* Sequential heat ramp. Deliberately NEUTRAL: it is a background magnitude
+     layer, so it must not compete with the blue/orange marks drawn on top of
+     it. Lightness steps down as shooting percentage goes up. */
+  --heat-1: #f1f0ed;
+  --heat-2: #e0ded7;
+  --heat-3: #cac7bc;
+  --heat-4: #adaa9c;
+  --heat-5: #8e8b7d;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 14px rgba(0, 0, 0, .05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface:        #121211;
+    --surface-raised: #1a1a19;
+    --ink:            #f4f3ef;
+    --ink-muted:      #c3c2b7;
+    --ink-faint:      #97958b;
+    --border:         #343431;
+    --border-strong:  #52514b;
+
+    --make:           #3987e5;
+    --miss:           #d95926;
+    --focus:          #6da7ec;
+
+    --heat-1: #232320;
+    --heat-2: #2f2e2a;
+    --heat-3: #3d3c36;
+    --heat-4: #4e4c45;
+    --heat-5: #625f56;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 14px rgba(0, 0, 0, .3);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface:        #121211;
+  --surface-raised: #1a1a19;
+  --ink:            #f4f3ef;
+  --ink-muted:      #c3c2b7;
+  --ink-faint:      #97958b;
+  --border:         #343431;
+  --border-strong:  #52514b;
+  --make:           #3987e5;
+  --miss:           #d95926;
+  --focus:          #6da7ec;
+  --heat-1: #232320;
+  --heat-2: #2f2e2a;
+  --heat-3: #3d3c36;
+  --heat-4: #4e4c45;
+  --heat-5: #625f56;
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 16px 48px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* A visible focus ring on everything that can be focused. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--surface-raised);
+  color: var(--ink);
+  padding: 10px 14px;
+  border: 2px solid var(--focus);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+.skip-link:focus { left: 8px; top: 8px; }
+
+/* --------------------------------------------------------------------------
+   Page frame
+   -------------------------------------------------------------------------- */
+
+.page-header,
+main,
+.page-footer {
+  max-width: 1040px;
+  margin-inline: auto;
+}
+
+.page-header {
+  padding: 28px 0 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 1.2rem + 2vw, 2.1rem);
+  letter-spacing: -.02em;
+}
+
+.tagline {
+  margin: 6px 0 0;
+  color: var(--ink-muted);
+}
+
+/* --------------------------------------------------------------------------
+   Theme toggle
+   --------------------------------------------------------------------------
+   Three real radio buttons drawn as one segmented control. "Auto" is a genuine
+   third state, not a default - it removes the override so the page goes back to
+   following the operating system. Which option is chosen is shown by a filled
+   background AND a bolder weight, so it is never colour alone.
+   -------------------------------------------------------------------------- */
+
+.theme-toggle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.theme-toggle legend {
+  margin-bottom: 5px;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-faint);
+}
+
+.theme-toggle__options {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.theme-toggle input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px; height: 1px;
+}
+
+.theme-toggle label {
+  padding: 7px 13px;
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ink-muted);
+  background: var(--surface-raised);
+  border-right: 1px solid var(--border-strong);
+  cursor: pointer;
+  user-select: none;
+}
+.theme-toggle label:last-of-type { border-right: 0; }
+
+.theme-toggle input:checked + label {
+  background: var(--ink);
+  color: var(--surface-raised);
+  font-weight: 700;
+}
+
+/* Inset, so the ring is not clipped by the rounded container. */
+.theme-toggle input:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: -3px;
+}
+
+main {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr;
+}
+
+/* Side-by-side once there is room; stacked on a phone. */
+@media (min-width: 900px) {
+  main {
+    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr);
+    /* The court is tall and spans both rows. Sizing the first row to its own
+       content stops the second row being pushed down to share that height,
+       which would leave a gap between the controls and the stats. */
+    grid-template-rows: auto 1fr;
+    align-items: start;
+  }
+  .panel--chart { grid-row: span 2; }
+}
+
+.panel {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+  letter-spacing: -.01em;
+}
+
+/* --------------------------------------------------------------------------
+   The court
+   -------------------------------------------------------------------------- */
+
+.court-wrap {
+  position: relative;
+  width: 100%;
+}
+
+#court {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: manipulation;   /* no double-tap zoom delay on a phone */
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 5;
+  transform: translate(-50%, -115%);
+  pointer-events: none;
+  background: var(--ink);
+  color: var(--surface-raised);
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: .8rem;
+  line-height: 1.35;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
+}
+.tooltip strong { display: block; font-weight: 600; }
+
+.help {
+  margin: 12px 0 0;
+  color: var(--ink-faint);
+  font-size: .875rem;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: .875rem;
+  color: var(--ink-muted);
+}
+.legend li { display: flex; align-items: center; gap: 7px; }
+
+.swatch {
+  width: 12px; height: 12px;
+  flex: 0 0 auto;
+  display: inline-block;
+}
+.swatch--make {
+  background: var(--make);
+  border-radius: 50%;
+}
+/* The miss swatch is drawn as an X so the legend matches the mark on the court. */
+.swatch--miss {
+  background:
+    linear-gradient(45deg,  transparent 42%, var(--miss) 42%, var(--miss) 58%, transparent 58%),
+    linear-gradient(-45deg, transparent 42%, var(--miss) 42%, var(--miss) 58%, transparent 58%);
+}
+
+.status {
+  margin: 14px 0 0;
+  min-height: 1.5em;
+  padding: 9px 11px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  color: var(--ink-muted);
+  font-size: .9rem;
+}
+.status[data-tone="error"] {
+  border-style: solid;
+  border-color: var(--miss);
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   Controls
+   -------------------------------------------------------------------------- */
+
+fieldset {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+legend {
+  padding: 0;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: .9rem;
+}
+
+.result-toggle__options { display: flex; gap: 10px; }
+
+/* The radios stay in the DOM - real form controls with real keyboard
+   behaviour - they are just drawn to look like buttons. */
+.result-toggle input[type="radio"] {
+  position: absolute;
+  opacity: 0;
+  width: 1px; height: 1px;
+}
+
+.result-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: center;
+  padding: 11px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+}
+
+/* The selected option is marked by a heavy fill AND a bolder weight, so the
+   choice is not carried by colour alone. */
+.result-toggle input:checked + label {
+  background: var(--ink);
+  color: var(--surface-raised);
+  border-color: var(--ink);
+  font-weight: 700;
+}
+
+.result-toggle input:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+
+.field label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.field-row .field { flex: 1; }
+
+select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface-raised);
+  padding: 10px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  width: 100%;
+}
+
+.btn {
+  font: inherit;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { background: var(--heat-1); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.btn--primary {
+  background: var(--ink);
+  color: var(--surface-raised);
+  border-color: var(--ink);
+}
+.btn--primary:hover:not(:disabled) { opacity: .88; background: var(--ink); }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.field--check {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+}
+.field--check input { width: 17px; height: 17px; accent-color: var(--make); }
+.field--check label { font-weight: 500; color: var(--ink); font-size: .9rem; }
+
+/* --------------------------------------------------------------------------
+   Stats table
+   -------------------------------------------------------------------------- */
+
+.empty-state {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: .9rem;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: .925rem;
+}
+
+.stats-table th,
+.stats-table td {
+  text-align: left;
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-table thead th {
+  font-size: .75rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-faint);
+  border-bottom-color: var(--border-strong);
+}
+
+.stats-table .num { text-align: right; }
+
+.stats-table tfoot td,
+.stats-table tfoot th {
+  font-weight: 700;
+  border-bottom: 0;
+  border-top: 2px solid var(--border-strong);
+}
+
+/* The zone name cell carries a small colour chip when the heat map is on, but
+   the number always sits beside it - the chip never stands in for a value. */
+.zone-cell { display: flex; align-items: center; gap: 9px; }
+.zone-chip {
+  width: 11px; height: 11px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  flex: 0 0 auto;
+}
+
+.stats-table tr[data-empty="true"] td,
+.stats-table tr[data-empty="true"] th { color: var(--ink-faint); }
+
+/* --------------------------------------------------------------------------
+   Footer
+   -------------------------------------------------------------------------- */
+
+.page-footer {
+  margin-top: 28px;
+  color: var(--ink-faint);
+  font-size: .825rem;
+  line-height: 1.6;
+}
+.page-footer p { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

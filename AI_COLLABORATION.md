@@ -76,6 +76,71 @@ numbers are printed on every zone whenever the shading is on.
   zone that is "hottest" off one lucky shot cannot hide how thin that is. If every
   zone is level it says so instead of inventing a best and a worst.
 
+## Player profiles, added last
+
+This is the stretch goal my plan said I did not get to: "save more than one
+session and compare them." It ended up as named players instead of named
+sessions, which fits my audience better, because the person with more than one
+session to track is a coach with more than one player.
+
+What it does: a Player dropdown at the top, with Add, Rename and Delete. Each
+player keeps their own shots, their own chart and their own stats. The CSV gains
+a player column and the file is named after them.
+
+The part that took the most care was not the feature, it was not losing anyone's
+data on the way:
+
+- The saved format went from one shot list to a list of players, so I bumped it
+  from version 1 to version 2. Version 1 is still read. If the app finds an old
+  single session it folds it into a player called "Player 1" and tells you it did
+  that, instead of the session just vanishing.
+- Everything that draws or counts reads one variable, and that variable points at
+  the active player's own shots array rather than a copy. Switching player is
+  just re-pointing it, which is why almost none of the older code had to change.
+  The trap was Clear session, which used to do `shots = []`. That makes a brand
+  new array and quietly breaks the link to the player, so the screen looks
+  cleared while the save still holds the old shots. It empties the array in place
+  now.
+- If the saved data is damaged, the app recovers but deliberately does **not**
+  write its recovered version back over it. Overwriting would destroy the only
+  copy of whatever went wrong.
+
+## A bug I found by using it, not by testing it
+
+When I clicked "Add player" nothing happened at all, and there was no way to set
+a player's name to what I actually wanted.
+
+The cause was that both Add and Rename used `window.prompt()`, the browser's
+built-in popup. A browser is allowed to suppress that popup, and when it does it
+returns the same value as the reader pressing Cancel. My code could not tell the
+two apart, so it just quietly gave up. No error, no message, nothing on screen.
+
+Every automated test passed the whole time, because the tests replaced
+`window.prompt` with a stub that always returned a name. The tests were checking
+my logic, and my logic was fine. The thing that was broken was the one piece I
+had handed to the browser.
+
+The fix was to stop depending on the popup. Naming now happens in a real text
+field with a visible label, an error message you can act on, Enter to save and
+Escape to cancel. Clear session and Delete player had exactly the same weakness,
+because `confirm()` can be suppressed in the same way and returns false when it
+is - so those buttons now arm themselves and ask you to press a second time
+instead of opening a dialog. The button's wording changes as well as its colour,
+so the armed state is not signalled by colour alone.
+
+This is the thing I would most want to say about testing: 137 passing checks did
+not catch it, and clicking the button once did. Automated tests are good at
+proving your own logic behaves, and no good at all at noticing that the
+environment refused to cooperate.
+
+## About the privacy note
+
+My plan said the app "stores no names, accounts or personal information." Adding
+players makes that untrue, because a player's name is exactly that. I took the
+privacy note out of the page rather than rewrite it. Nothing about where the data
+lives has changed: it is all still in my own browser, there is still no account,
+no API and no server.
+
 ## Something I know is still wrong
 
 The heat map shades a zone purely on percentage, so 1 for 1 looks exactly as hot
@@ -129,6 +194,13 @@ the keyboard route, and the session surviving a real page reload.
 
 **The theme toggle: 21 checks, all passing.** All three options, the choice
 getting saved, and the choice surviving a reload.
+
+**Player profiles: 61 checks, all passing.** That shots, undo and clear only
+ever touch the player on screen and never the others; that switching players
+swaps the chart, the table and the heading together; that names cannot be blank
+or repeated; that the last player cannot be deleted; that an old version 1
+session is converted and nothing is lost; and that damaged saves still load one
+working player without being overwritten.
 
 **The two late additions: 23 checks, all passing.** That the hottest and coldest
 line stays hidden until two zones have attempts, that a middle zone cannot become

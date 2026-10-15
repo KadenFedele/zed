@@ -139,14 +139,7 @@ main,
   margin-inline: auto;
 }
 
-.page-header {
-  padding: 28px 0 20px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px 24px;
-  align-items: flex-end;
-  justify-content: space-between;
-}
+.page-header { padding: 28px 0 20px; }
 
 h1 {
   margin: 0;
@@ -167,6 +160,130 @@ h1 {
    following the operating system. Which option is chosen is shown by a filled
    background AND a bolder weight, so it is never colour alone.
    -------------------------------------------------------------------------- */
+
+/* --------------------------------------------------------------------------
+   Player bar
+   -------------------------------------------------------------------------- */
+
+.profile-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.profile-bar label {
+  font-size: .75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--ink-faint);
+}
+
+.profile-bar select {
+  width: auto;
+  flex: 1 1 150px;
+  max-width: 260px;
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   Name editor
+   --------------------------------------------------------------------------
+   Replaces window.prompt(). A browser popup is not a form field, cannot carry
+   a label, and is silently suppressed in some browsers and preview panes - at
+   which point the button appears to do nothing at all.
+   -------------------------------------------------------------------------- */
+
+.name-editor {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  max-width: 460px;
+}
+
+.name-editor > label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.name-editor__row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.name-editor input[type="text"] {
+  flex: 1 1 160px;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface-raised);
+  padding: 10px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.name-editor__error {
+  margin: 8px 0 0;
+  font-size: .85rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+.name-editor__error:empty { display: none; }
+
+/* A button waiting for a second press to confirm. The wording changes too, so
+   the state is never carried by colour alone. */
+.btn[data-armed="true"] {
+  background: var(--miss);
+  border-color: var(--miss);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* The player's name beside the stats heading, so a coach is never looking at
+   one player's chart thinking it is another's. */
+.stats-for {
+  font-weight: 500;
+  color: var(--ink-faint);
+}
+.stats-for:not(:empty)::before {
+  content: " — ";
+  color: var(--border-strong);
+}
+
+/* The toggle is last in the page. On a narrow screen it simply stays there,
+   below the app, where it costs nothing. From 721px up it is lifted into the
+   top-right corner of the header, lined up with the same 1040px column the
+   rest of the page uses. */
+.theme-bar {
+  max-width: 1040px;
+  margin: 24px auto 0;
+  display: flex;
+  justify-content: flex-start;
+}
+
+@media (min-width: 760px) {
+  body { position: relative; }
+
+  .theme-bar {
+    position: absolute;
+    top: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 32px);
+    margin: 0;
+    justify-content: flex-end;
+    pointer-events: none;      /* never blocks the heading underneath */
+  }
+  .theme-bar .theme-toggle { pointer-events: auto; }
+}
 
 .theme-toggle {
   margin: 0;
@@ -228,9 +345,12 @@ main {
 }
 
 /* Side-by-side once there is room; stacked on a phone. */
-@media (min-width: 900px) {
+@media (min-width: 760px) {
   main {
-    grid-template-columns: minmax(0, 1.25fr) minmax(300px, 1fr);
+    /* The court gets the lion's share. Once the controls sit in their own
+       column they are always on screen whatever the court's height, so the
+       court is free to be as big as the width allows. */
+    grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
     /* The court is tall and spans both rows. Sizing the first row to its own
        content stops the second row being pushed down to share that height,
        which would leave a gap between the controls and the stats. */
@@ -536,4 +656,72 @@ select {
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
+}
+
+/* ==========================================================================
+   Phones
+   --------------------------------------------------------------------------
+   This app is meant to be used at the gym, on a phone, one-handed. The thing
+   that matters most is that the court AND the Make / Miss buttons are on the
+   screen at the same time - you alternate between them constantly, and having
+   to scroll between every shot makes the app useless for its own purpose.
+
+   So on a narrow screen every bit of spare height is reclaimed: smaller page
+   and card padding, a tighter header, and the keyboard sentence (which does
+   not apply to a touch screen anyway) is dropped. Reclaiming the side padding
+   also makes the court itself noticeably bigger, which is the other half of
+   the problem - a fingertip covers several feet of court at this size.
+   ========================================================================== */
+
+@media (max-width: 759px) {
+  body { padding: 0 8px 28px; }
+
+  .page-header { padding: 14px 0 10px; }
+  h1 { font-size: 1.4rem; }
+  .tagline { margin-top: 3px; font-size: .9rem; }
+
+  main { gap: 12px; }
+
+  .panel { padding: 10px; border-radius: 8px; }
+
+  /* Irrelevant on a touch screen, and it costs three lines of height. */
+  .help__keyboard { display: none; }
+
+  .help { margin-top: 8px; font-size: .8rem; }
+  .legend { margin-top: 8px; font-size: .8rem; gap: 6px 14px; }
+  .status { margin-top: 9px; padding: 7px 9px; }
+
+  h2 { margin-bottom: 8px; }
+  fieldset { margin-bottom: 12px; }
+  .field-row, .actions { margin-bottom: 12px; }
+
+  .theme-bar { margin-top: 16px; }
+}
+
+/* ==========================================================================
+   Touch screens
+   --------------------------------------------------------------------------
+   44px is the usual minimum for something you hit with a thumb.
+
+   Two conditions, either one is enough. The width covers every phone and
+   tablet deterministically, which matters because pointer detection cannot be
+   relied on - some browsers and most testing tools report a mouse even on a
+   touch screen. The pointer query then catches the big touch screens that are
+   wider than the cut-off, such as a 12.9in tablet in landscape.
+   ========================================================================== */
+
+@media (max-width: 1024px), (pointer: coarse) {
+  .btn,
+  select,
+  .result-toggle label,
+  .theme-toggle label { min-height: 44px; }
+
+  .theme-toggle label { display: flex; align-items: center; }
+
+  /* The row has to be 44px tall AND the label has to fill it - the label is
+     what you actually hit, so sizing only the row leaves a 22px target
+     floating inside a 44px box. */
+  .field--check { min-height: 44px; gap: 12px; align-items: stretch; }
+  .field--check input { width: 22px; height: 22px; align-self: center; }
+  .field--check label { flex: 1; display: flex; align-items: center; min-height: 44px; }
 }

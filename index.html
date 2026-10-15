@@ -27,24 +27,29 @@
     <a class="skip-link" href="#main">Skip to the court</a>
 
     <header class="page-header">
-      <div class="page-header__text">
-        <h1>Shot Chart Tracker</h1>
-        <p class="tagline">Pick Make or Miss, then click where you shot from.</p>
+      <h1>Shot Chart Tracker</h1>
+      <p class="tagline">Pick Make or Miss, then tap where you shot from.</p>
+
+      <!-- Whose session this is. A coach can keep a separate chart per player,
+           and each one is saved on its own. -->
+      <div class="profile-bar">
+        <label for="profile-select">Player</label>
+        <select id="profile-select"></select>
+        <button type="button" id="profile-new" class="btn">Add player</button>
       </div>
 
-      <fieldset class="theme-toggle">
-        <legend>Theme</legend>
-        <div class="theme-toggle__options">
-          <input type="radio" name="theme" id="theme-auto" value="auto" checked>
-          <label for="theme-auto">Auto</label>
-
-          <input type="radio" name="theme" id="theme-light" value="light">
-          <label for="theme-light">Light</label>
-
-          <input type="radio" name="theme" id="theme-dark" value="dark">
-          <label for="theme-dark">Dark</label>
+      <!-- Naming happens in a real form field, not a browser popup. Hidden
+           until you add or rename someone, so it costs no height until then. -->
+      <div class="name-editor" id="name-editor" hidden>
+        <label for="player-name" id="name-editor-label">Player name</label>
+        <div class="name-editor__row">
+          <input type="text" id="player-name" maxlength="40" autocomplete="off"
+                 spellcheck="false" placeholder="e.g. Jordan M">
+          <button type="button" id="name-save" class="btn btn--primary">Save</button>
+          <button type="button" id="name-cancel" class="btn">Cancel</button>
         </div>
-      </fieldset>
+        <p class="name-editor__error" id="name-error" role="alert"></p>
+      </div>
     </header>
 
     <main id="main">
@@ -64,8 +69,9 @@
         </div>
 
         <p id="court-help" class="help">
-          Click the court to log a shot. If you are using a keyboard, choose a zone
-          in the Zone list below and press Log shot.
+          Click or tap the court to log a shot.<span class="help__keyboard"> If you are
+          using a keyboard, choose a zone in the Zone list below and press Log
+          shot.</span>
         </p>
 
         <!-- Legend: identity is never carried by colour alone - each mark has its
@@ -110,6 +116,8 @@
           <button type="button" id="undo" class="btn">Undo last shot</button>
           <button type="button" id="clear" class="btn">Clear session</button>
           <button type="button" id="export" class="btn">Export CSV</button>
+          <button type="button" id="profile-rename" class="btn">Rename player</button>
+          <button type="button" id="profile-delete" class="btn">Delete player</button>
         </div>
 
         <div class="field field--check">
@@ -125,7 +133,7 @@
 
       <!-- ================= The numbers ================= -->
       <section class="panel panel--stats" aria-labelledby="stats-heading">
-        <h2 id="stats-heading">Zone stats</h2>
+        <h2 id="stats-heading">Zone stats<span id="stats-for" class="stats-for"></span></h2>
 
         <p id="empty-state" class="empty-state">
           No shots yet. Click the court to log your first shot.
@@ -150,13 +158,25 @@
 
     </main>
 
-    <footer class="page-footer">
-      <p>
-        <strong>Privacy:</strong> every shot you log stays in your own browser
-        (localStorage) so your session survives a refresh. No accounts, no names,
-        no API, nothing sent to a server.
-      </p>
-    </footer>
+    <!-- Last in the page on purpose. On a phone this sits out of the way at the
+         bottom; on a wide screen the stylesheet lifts it into the top right
+         corner, so a cosmetic control never eats the space above the court. -->
+    <div class="theme-bar">
+      <fieldset class="theme-toggle">
+        <legend>Theme</legend>
+        <div class="theme-toggle__options">
+          <input type="radio" name="theme" id="theme-auto" value="auto" checked>
+          <label for="theme-auto">Auto</label>
+
+          <input type="radio" name="theme" id="theme-light" value="light">
+          <label for="theme-light">Light</label>
+
+          <input type="radio" name="theme" id="theme-dark" value="dark">
+          <label for="theme-dark">Dark</label>
+        </div>
+      </fieldset>
+    </div>
+
 
     <script src="js/app.js"></script>
   </body>

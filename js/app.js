@@ -198,10 +198,25 @@
      3. STATE + STORAGE
      ========================================================================= */
 
-  var STORAGE_KEY = 'shotChartTracker.v1';
+  /* Version 2 of the saved data holds a LIST of players, each with their own
+     shots, so a coach can keep one chart per player. Version 1 held a single
+     shot list; it is still read, and folded into one player, so an old session
+     is never stranded. */
+  var STORAGE_KEY = 'shotChartTracker.v2';
+  var LEGACY_KEY  = 'shotChartTracker.v1';
+
+  var MAX_NAME = 40;
 
   var state = {
-    shots: [],          // the only thing that is saved
+    players: [],        // [{ id, name, shots: [...] }]
+    activeId: null,
+
+    /* A live reference to the active player's OWN shots array - not a copy.
+       Everything that draws or counts reads this, so switching player is just
+       re-pointing it. Anything that empties it must do so in place
+       (shots.length = 0), or the link to the player is quietly broken. */
+    shots: [],
+
     result: 'make',     // the Make/Miss toggle - deliberately NOT saved
     heatmap: false,
     showMisses: true,
@@ -210,6 +225,39 @@
 
   /* None of the three above are saved. The rule is: the session is what
      persists, how you are currently LOOKING at it resets. */
+
+  function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function cleanName(raw) {
+    return String(raw == null ? '' : raw).replace(/\s+/g, ' ').trim().slice(0, MAX_NAME);
+  }
+
+  function makePlayer(name, shots) {
+    return { id: newId(), name: cleanName(name) || 'Player', shots: shots || [] };
+  }
+
+  function activePlayer() {
+    for (var i = 0; i < state.players.length; i++) {
+      if (state.players[i].id === state.activeId) return state.players[i];
+    }
+    return state.players[0] || null;
+  }
+
+  function activeName() {
+    var p = activePlayer();
+    return p ? p.name : '';
+  }
+
+  function nameTaken(name, exceptId) {
+    var wanted = cleanName(name).toLowerCase();
+    for (var i = 0; i < state.players.length; i++) {
+      if (state.players[i].id === exceptId) continue;
+      if (state.players[i].name.toLowerCase() === wanted) return true;
+    }
+    return false;
+  }
 
   function makeShot(x, y, zone, made, source) {
     return {
@@ -237,65 +285,349 @@
      The load is wrapped in try/catch, individual bad shots are dropped rather
      than taking the whole session down, and the reader is told what happened.
      ------------------------------------------------------------------------- */
-  function loadShots() {
-    var raw;
-
+  function readKey(key) {
     try {
-      raw = window.localStorage.getItem(STORAGE_KEY);
+      return { ok: true, raw: window.localStorage.getItem(key) };
     } catch (err) {
       // Storage can be blocked entirely (private mode, blocked cookies).
-      state.storageWorks = false;
-      return {
-        shots: [],
-        notice: 'Your browser is blocking local storage, so this session will ' +
-                'not survive a refresh. Everything else still works.'
-      };
+      return { ok: false, raw: null };
     }
+  }
 
-    if (!raw) return { shots: [], notice: null };
+  /* One player out of saved data, or null if there is nothing usable in it.
+     Bad shots inside an otherwise fine player are dropped one by one rather
+     than throwing the whole player away. */
+  function readPlayer(raw, dropped) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (!Array.isArray(raw.shots)) return null;
 
-    var parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (err) {
-      return {
-        shots: [],
-        notice: 'Could not load your last session, so a new one was started.'
-      };
-    }
-
-    var list = parsed && Array.isArray(parsed.shots) ? parsed.shots : null;
-    if (!list) {
-      return {
-        shots: [],
-        notice: 'Could not load your last session, so a new one was started.'
-      };
-    }
-
-    var good = list.filter(isValidShot);
-    var dropped = list.length - good.length;
+    var good = raw.shots.filter(isValidShot);
+    dropped.count += raw.shots.length - good.length;
 
     return {
-      shots: good,
-      notice: dropped > 0
-        ? 'Skipped ' + dropped + ' saved ' + (dropped === 1 ? 'shot' : 'shots') +
-          ' that did not look right. The rest of your session loaded fine.'
-        : null
+      id: typeof raw.id === 'string' && raw.id ? raw.id : newId(),
+      name: cleanName(raw.name) || 'Player',
+      shots: good
     };
   }
 
-  function saveShots() {
+  function loadEverything() {
+    var current = readKey(STORAGE_KEY);
+
+    if (!current.ok) {
+      state.storageWorks = false;
+      return {
+        players: [makePlayer('Player 1')],
+        activeId: null,
+        safeToSave: false,
+        notice: 'Your browser is blocking local storage, so nothing will be ' +
+                'saved between visits. Everything else still works.'
+      };
+    }
+
+    var dropped = { count: 0 };
+
+    // ---- the current format ----
+    if (current.raw) {
+      var parsed = null;
+      try {
+        parsed = JSON.parse(current.raw);
+      } catch (err) {
+        return {
+          players: [makePlayer('Player 1')],
+          activeId: null,
+          safeToSave: false,
+          notice: 'Could not load your saved players, so a new session was started.'
+        };
+      }
+
+      var list = parsed && Array.isArray(parsed.players) ? parsed.players : null;
+      if (list) {
+        var players = [];
+        for (var i = 0; i < list.length; i++) {
+          var p = readPlayer(list[i], dropped);
+          if (p) players.push(p);
+        }
+
+        if (players.length) {
+          return {
+            players: players,
+            activeId: typeof parsed.activeId === 'string' ? parsed.activeId : null,
+            /* If shots were dropped, the stored copy is left exactly as it is.
+               Writing the cleaned version back would throw away the only
+               evidence of what went wrong. */
+            safeToSave: dropped.count === 0,
+            notice: dropped.count > 0
+              ? 'Skipped ' + dropped.count + ' saved ' +
+                (dropped.count === 1 ? 'shot' : 'shots') +
+                ' that did not look right. Everything else loaded fine.'
+              : null
+          };
+        }
+      }
+
+      return {
+        players: [makePlayer('Player 1')],
+        activeId: null,
+        safeToSave: false,
+        notice: 'Could not load your saved players, so a new session was started.'
+      };
+    }
+
+    // ---- nothing current: is there an old single-session save to rescue? ----
+    var legacy = readKey(LEGACY_KEY);
+    if (legacy.ok && legacy.raw) {
+      try {
+        var old = JSON.parse(legacy.raw);
+        if (old && Array.isArray(old.shots)) {
+          var rescued = old.shots.filter(isValidShot);
+          if (rescued.length) {
+            return {
+              players: [makePlayer('Player 1', rescued)],
+              activeId: null,
+              safeToSave: true,        // commit the conversion straight away
+              notice: 'Your previous session was moved into a player called ' +
+                      '"Player 1". You can rename it or add more players.'
+            };
+          }
+        }
+      } catch (err) {
+        /* An unreadable old save is simply left behind. */
+      }
+    }
+
+    // ---- a genuinely fresh start ----
+    return { players: [makePlayer('Player 1')], activeId: null, safeToSave: true, notice: null };
+  }
+
+  function saveEverything() {
     if (!state.storageWorks) return;
     try {
-      window.localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ version: 1, shots: state.shots })
-      );
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        version: 2,
+        activeId: state.activeId,
+        players: state.players
+      }));
     } catch (err) {
       state.storageWorks = false;
       setStatus('Could not save to local storage, so this session will not ' +
                 'survive a refresh.', 'error');
     }
+  }
+
+  /* Kept under the old name so every caller that logs, undoes or clears a shot
+     carries on working untouched. */
+  function saveShots() { saveEverything(); }
+
+  /* -------------------------------------------------------------------------
+     Switching, adding, renaming and deleting players.
+     ------------------------------------------------------------------------- */
+
+  /* Points state.shots at a player's own array. This is the ONLY place the
+     reference is set, which is what keeps the chart, the table and the saved
+     data describing the same player. */
+  function setActivePlayer(id) {
+    var found = null;
+    for (var i = 0; i < state.players.length; i++) {
+      if (state.players[i].id === id) found = state.players[i];
+    }
+    if (!found) found = state.players[0];
+    if (!found) {
+      found = makePlayer('Player 1');
+      state.players.push(found);
+    }
+
+    state.activeId = found.id;
+    state.shots = found.shots;
+    return found;
+  }
+
+  function fillPlayerSelect() {
+    playerSelect.innerHTML = '';
+
+    for (var i = 0; i < state.players.length; i++) {
+      var p = state.players[i];
+      var opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name + '  (' + p.shots.length +
+        (p.shots.length === 1 ? ' shot)' : ' shots)');
+      if (p.id === state.activeId) opt.selected = true;
+      playerSelect.appendChild(opt);
+    }
+  }
+
+  /* -------------------------------------------------------------------------
+     Naming a player.
+
+     This used to call window.prompt(). It does not any more: a popup is not a
+     form field, it cannot carry a visible label, and some browsers and preview
+     panes suppress it outright - and a suppressed prompt returns null, which
+     looks exactly like the reader pressing Cancel. The button then appears to
+     do nothing at all, with no error to go on.
+
+     A real <input> cannot fail that way, can be labelled, and can show an error
+     the reader can act on.
+     ------------------------------------------------------------------------- */
+
+  /* -------------------------------------------------------------------------
+     "Press it again to confirm", in place of window.confirm().
+
+     Same reasoning as the name editor: a suppressed confirm() returns false,
+     which is indistinguishable from the reader pressing Cancel, so a destructive
+     button silently does nothing. Arming the button instead keeps the
+     protection without depending on a dialog that may never appear.
+
+     The button's WORDING changes as well as its colour, and the status line
+     explains what is about to happen, so nothing is signalled by colour alone.
+     ------------------------------------------------------------------------- */
+
+  var armed = null;           // { kind, button, label, timer }
+
+  function isArmed(kind) {
+    return !!armed && armed.kind === kind;
+  }
+
+  function armConfirm(kind, button, message) {
+    cancelArmedConfirm();
+
+    armed = {
+      kind: kind,
+      button: button,
+      label: button.textContent,
+      timer: window.setTimeout(function () {
+        cancelArmedConfirm();
+        setStatus('Cancelled - nothing was changed.');
+      }, 8000)
+    };
+
+    button.textContent = 'Press again to confirm';
+    button.setAttribute('data-armed', 'true');
+    setStatus(message, 'error');
+  }
+
+  function cancelArmedConfirm() {
+    if (!armed) return;
+    window.clearTimeout(armed.timer);
+    armed.button.textContent = armed.label;
+    armed.button.removeAttribute('data-armed');
+    armed = null;
+  }
+
+  var nameMode = null;        // 'add' or 'rename' while the editor is open
+
+  function openNameEditor(mode) {
+    cancelArmedConfirm();
+    nameMode = mode;
+
+    var player = activePlayer();
+    nameEditorLabel.textContent = mode === 'add'
+      ? 'Name for the new player'
+      : 'New name for ' + (player ? player.name : 'this player');
+
+    nameInput.value = mode === 'rename' && player ? player.name : '';
+    nameError.textContent = '';
+    nameEditor.hidden = false;
+
+    nameInput.focus();
+    nameInput.select();
+  }
+
+  function closeNameEditor() {
+    nameMode = null;
+    nameEditor.hidden = true;
+    nameError.textContent = '';
+  }
+
+  function submitName() {
+    if (!nameMode) return;
+
+    var name = cleanName(nameInput.value);
+
+    if (!name) {
+      nameError.textContent = 'Please type a name.';
+      nameInput.focus();
+      return;
+    }
+
+    if (nameMode === 'add') {
+      if (nameTaken(name, null)) {
+        nameError.textContent = 'There is already a player called "' + name + '".';
+        nameInput.focus();
+        return;
+      }
+
+      var player = makePlayer(name);
+      state.players.push(player);
+      setActivePlayer(player.id);
+
+      saveEverything();
+      fillPlayerSelect();
+      render();
+      refreshButtons();
+      closeNameEditor();
+      setStatus('Added ' + name + '. Click the court to log their first shot.');
+      return;
+    }
+
+    // ---- rename ----
+    var current = activePlayer();
+    if (!current) { closeNameEditor(); return; }
+
+    if (name === current.name) { closeNameEditor(); return; }
+
+    if (nameTaken(name, current.id)) {
+      nameError.textContent = 'There is already a player called "' + name + '".';
+      nameInput.focus();
+      return;
+    }
+
+    var was = current.name;
+    current.name = name;
+
+    saveEverything();
+    fillPlayerSelect();
+    render();
+    closeNameEditor();
+    setStatus('Renamed ' + was + ' to ' + name + '.');
+  }
+
+  function addPlayer() { openNameEditor('add'); }
+
+  function renamePlayer() {
+    if (!activePlayer()) return;
+    openNameEditor('rename');
+  }
+
+  function deletePlayer() {
+    var player = activePlayer();
+    if (!player) return;
+
+    /* There is always at least one player. Deleting the last one would leave
+       the app with no chart to show, so clearing is offered instead. */
+    if (state.players.length === 1) {
+      setStatus('This is your only player, so there would be nothing left. ' +
+                'Use Clear session to empty their shots instead.', 'error');
+      return;
+    }
+
+    /* Two presses instead of a confirm() dialog - see armConfirm(). */
+    if (!isArmed('delete')) {
+      armConfirm('delete', playerDeleteBtn,
+        'This deletes ' + player.name + ' and all ' + player.shots.length +
+        ' of their shots. Press Delete player again to confirm, or press Escape.');
+      return;
+    }
+    cancelArmedConfirm();
+
+    var gone = player.name;
+    state.players = state.players.filter(function (p) { return p.id !== player.id; });
+    setActivePlayer(state.players[0].id);
+
+    saveEverything();
+    fillPlayerSelect();
+    render();
+    refreshButtons();
+    setStatus('Deleted ' + gone + '. Now showing ' + activeName() + '.');
   }
 
   /* =========================================================================
@@ -874,16 +1206,19 @@
      description is kept in step with what it shows. The full detail lives in
      the stats table, which is real markup. */
   function updateCanvasLabel(stats) {
+    statsFor.textContent = activeName();
+
     if (state.shots.length === 0) {
       canvas.setAttribute('aria-label',
-        'Basketball half court, split into four shooting zones. No shots logged yet.');
+        'Basketball half court, split into four shooting zones. No shots logged ' +
+        'yet for ' + activeName() + '.');
       return;
     }
 
     var misses = stats.total.attempts - stats.total.makes;
 
     canvas.setAttribute('aria-label',
-      'Basketball half court showing ' + state.shots.length + ' logged ' +
+      'Basketball half court showing ' + activeName() + ', ' + state.shots.length + ' logged ' +
       (state.shots.length === 1 ? 'shot' : 'shots') + '. Overall ' +
       stats.total.makes + ' of ' + stats.total.attempts + ', ' +
       pctText(stats.total) + '. ' +
@@ -911,8 +1246,10 @@
 
   function logShot(x, y, zone, source) {
     var made = state.result === 'make';
+    cancelArmedConfirm();
     state.shots.push(makeShot(x, y, zone, made, source));
     saveShots();
+    fillPlayerSelect();
     render();
 
     var stats = computeStats()[zone];
@@ -931,6 +1268,7 @@
 
     var removed = state.shots.pop();
     saveShots();
+    fillPlayerSelect();
     render();
 
     setStatus('Removed the last shot: ' + (removed.made ? 'Make' : 'Miss') +
@@ -944,15 +1282,22 @@
       return;
     }
 
-    var ok = window.confirm(
-      'Clear all ' + state.shots.length + ' shots from this session? This cannot be undone.'
-    );
-    if (!ok) return;
+    /* Two presses instead of a confirm() dialog - see armConfirm(). */
+    if (!isArmed('clear')) {
+      armConfirm('clear', clearBtn,
+        'This removes all ' + state.shots.length + ' shots for ' + activeName() +
+        '. Press Clear session again to confirm, or press Escape.');
+      return;
+    }
+    cancelArmedConfirm();
 
-    state.shots = [];
+    /* In place, NOT state.shots = [] - the array has to stay the same object
+       that the player holds, or the two quietly drift apart. */
+    state.shots.length = 0;
     saveShots();
+    fillPlayerSelect();
     render();
-    setStatus('Session cleared. Click the court to start a new one.');
+    setStatus('Cleared ' + activeName() + '. Click the court to start again.');
     refreshButtons();
   }
 
@@ -967,11 +1312,12 @@
       return;
     }
 
-    var rows = [['shot', 'zone', 'result', 'x_feet', 'y_feet', 'logged_at']];
+    var rows = [['player', 'shot', 'zone', 'result', 'x_feet', 'y_feet', 'logged_at']];
 
     for (var i = 0; i < state.shots.length; i++) {
       var s = state.shots[i];
-      rows.push([i + 1, zoneLabel(s.zone), s.made ? 'make' : 'miss', s.x, s.y, s.t]);
+      rows.push([activeName(), i + 1, zoneLabel(s.zone),
+                 s.made ? 'make' : 'miss', s.x, s.y, s.t]);
     }
 
     var csv = rows.map(function (row) {
@@ -983,13 +1329,17 @@
     var link = document.createElement('a');
 
     link.href = url;
-    link.download = 'shot-chart-' + new Date().toISOString().slice(0, 10) + '.csv';
+    var slug = activeName().toLowerCase().replace(/[^a-z0-9]+/g, '-')
+                 .replace(/^-|-$/g, '') || 'player';
+    link.download = 'shot-chart-' + slug + '-' +
+                    new Date().toISOString().slice(0, 10) + '.csv';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    setStatus('Exported ' + state.shots.length + ' shots as a CSV file.');
+    setStatus('Exported ' + state.shots.length + ' shots for ' +
+              activeName() + ' as a CSV file.');
   }
 
   /* =========================================================================
@@ -1068,12 +1418,25 @@
   var zoneSelect = document.getElementById('zone-select');
   var heatToggle = document.getElementById('heatmap');
   var missesToggle = document.getElementById('show-misses');
+  var playerSelect = document.getElementById('profile-select');
+  var playerNewBtn = document.getElementById('profile-new');
+  var playerRenameBtn = document.getElementById('profile-rename');
+  var playerDeleteBtn = document.getElementById('profile-delete');
+  var statsFor = document.getElementById('stats-for');
+  var nameEditor = document.getElementById('name-editor');
+  var nameEditorLabel = document.getElementById('name-editor-label');
+  var nameInput = document.getElementById('player-name');
+  var nameError = document.getElementById('name-error');
+  var nameSaveBtn = document.getElementById('name-save');
+  var nameCancelBtn = document.getElementById('name-cancel');
 
   function refreshButtons() {
     var empty = state.shots.length === 0;
     undoBtn.disabled = empty;
     clearBtn.disabled = empty;
     exportBtn.disabled = empty;
+    // There is always at least one player, so the last one cannot be deleted.
+    playerDeleteBtn.disabled = state.players.length < 2;
   }
 
   // ---- logging by clicking (or tapping) the court ----
@@ -1124,6 +1487,49 @@
   undoBtn.addEventListener('click', undoLastShot);
   clearBtn.addEventListener('click', clearSession);
   exportBtn.addEventListener('click', exportCSV);
+
+  // ---- players ----
+  playerSelect.addEventListener('change', function (event) {
+    cancelArmedConfirm();
+    closeNameEditor();
+    var player = setActivePlayer(event.target.value);
+    render();
+    refreshButtons();
+    setStatus('Now showing ' + player.name + ' - ' + player.shots.length +
+              (player.shots.length === 1 ? ' shot' : ' shots') + ' logged.');
+  });
+
+  playerNewBtn.addEventListener('click', addPlayer);
+  playerRenameBtn.addEventListener('click', renamePlayer);
+  playerDeleteBtn.addEventListener('click', deletePlayer);
+
+  // ---- the name editor ----
+  nameSaveBtn.addEventListener('click', submitName);
+  nameCancelBtn.addEventListener('click', function () {
+    closeNameEditor();
+    setStatus('Cancelled - no name was changed.');
+  });
+
+  /* Enter saves and Escape cancels, which is what anyone typing in a text box
+     expects. Enter is caught on keydown so it never submits anything else. */
+  nameInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitName();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeNameEditor();
+      setStatus('Cancelled - no name was changed.');
+    }
+  });
+
+  /* Escape also backs out of an armed Clear or Delete, from anywhere on the
+     page, so a destructive button is never left sitting armed. */
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !armed) return;
+    cancelArmedConfirm();
+    setStatus('Cancelled - nothing was changed.');
+  });
 
   heatToggle.addEventListener('change', function (event) {
     state.heatmap = event.target.checked;
@@ -1184,8 +1590,16 @@
   var themeInput = document.getElementById('theme-' + currentTheme);
   if (themeInput) themeInput.checked = true;
 
-  var loaded = loadShots();
-  state.shots = loaded.shots;
+  var loaded = loadEverything();
+  state.players = loaded.players;
+  setActivePlayer(loaded.activeId);
+  fillPlayerSelect();
+
+  /* Write the starting state out once, so what is stored always matches what
+     is on screen - and so a converted old session is committed immediately
+     rather than waiting for the next shot. Skipped when the load had to
+     recover from damaged data, which is left untouched on purpose. */
+  if (loaded.safeToSave) saveEverything();
 
   resizeCanvas();
   refreshButtons();
@@ -1193,7 +1607,7 @@
   if (loaded.notice) {
     setStatus(loaded.notice, 'error');
   } else if (state.shots.length > 0) {
-    setStatus('Loaded your last session: ' + state.shots.length + ' ' +
+    setStatus('Loaded ' + activeName() + ': ' + state.shots.length + ' ' +
               (state.shots.length === 1 ? 'shot' : 'shots') + '.');
   } else {
     setStatus('Pick Make or Miss, then click the court to log your first shot.');

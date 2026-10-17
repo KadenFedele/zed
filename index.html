@@ -116,6 +116,12 @@
           <button type="button" id="undo" class="btn">Undo last shot</button>
           <button type="button" id="clear" class="btn">Clear session</button>
           <button type="button" id="export" class="btn">Export CSV</button>
+
+          <!-- A real file input, hidden, driven by its own label so it still
+               looks and behaves like the buttons beside it. -->
+          <input type="file" id="import-file" class="file-input"
+                 accept=".csv,text/csv,text/plain">
+          <label for="import-file" class="btn">Import CSV</label>
           <button type="button" id="profile-rename" class="btn">Rename player</button>
           <button type="button" id="profile-delete" class="btn">Delete player</button>
         </div>

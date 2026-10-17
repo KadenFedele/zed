@@ -133,6 +133,30 @@ not catch it, and clicking the button once did. Automated tests are good at
 proving your own logic behaves, and no good at all at noticing that the
 environment refused to cooperate.
 
+## Importing a CSV back in
+
+Export already existed, so import is the other half of it: pick a CSV you saved
+earlier and the shots come back. It is useful with players, because a coach can
+export one player's session, and load it again later or on another computer.
+
+Three decisions in it worth saying out loud:
+
+- **The file is treated as untrusted.** It may have been edited in a spreadsheet,
+  or not be one of my files at all. Nothing is added until the whole file has
+  been read and checked, so a half-broken file cannot leave a half-imported
+  session behind.
+- **The coordinates win over the zone column.** Each row says which zone it was,
+  but I recalculate the zone from the x and y instead of believing it. If someone
+  edits a row by hand so the zone and the position disagree, the position is the
+  real thing, and that keeps the chart and the percentages telling the same story.
+- **I wrote a real CSV reader rather than splitting on commas**, because a player
+  called "Smith, J" is written as a quoted field, and splitting on commas would
+  quietly wreck that row and every row after it.
+
+Shots are filed under the player named in the file. An existing name gets the
+shots added to it, a new name becomes a new player, and a file with no player
+column loads into whoever is on screen.
+
 ## About the privacy note
 
 My plan said the app "stores no names, accounts or personal information." Adding
@@ -194,6 +218,12 @@ the keyboard route, and the session surviving a real page reload.
 
 **The theme toggle: 21 checks, all passing.** All three options, the choice
 getting saved, and the choice surviving a reload.
+
+**CSV import: 27 checks, all passing.** The reader was tested against quoted
+fields, commas inside a player's name, doubled quotes, both line endings and
+empty fields, plus rows with bad numbers, off-court positions and nonsense in
+the result column. The last test exports a file and reads it back to confirm
+every shot comes home in the right zone.
 
 **Player profiles: 61 checks, all passing.** That shots, undo and clear only
 ever touch the player on screen and never the others; that switching players

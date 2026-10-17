@@ -566,6 +566,23 @@ select {
   margin-bottom: 16px;
 }
 
+/* The file input itself is hidden, but it is still a real focusable control,
+   so its focus ring has to be drawn on the label the reader can actually see. */
+.file-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.file-input:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.actions label.btn {
+  display: inline-flex;
+  align-items: center;
+}
+
 .field--check {
   flex-direction: row;
   align-items: center;

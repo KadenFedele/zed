@@ -1306,6 +1306,235 @@
     return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
   }
 
+  /* -------------------------------------------------------------------------
+     Importing a CSV that this app exported earlier.
+
+     The file is treated as untrusted: it may have been edited by hand, saved
+     from a spreadsheet, or not be one of ours at all. Nothing is added to the
+     session until the whole file has been read and checked, so a half-broken
+     file cannot leave a half-imported session behind.
+     ------------------------------------------------------------------------- */
+
+  var MAX_IMPORT_ROWS = 5000;
+
+  /* A small CSV reader that understands quoted fields, doubled quotes inside
+     them, and both line endings. Written out rather than split(',') because a
+     player called "Smith, J" would quietly destroy every row after it. */
+  function parseCSV(text) {
+    var rows = [];
+    var row = [];
+    var field = '';
+    var inQuotes = false;
+    var i = 0;
+
+    while (i < text.length) {
+      var ch = text.charAt(i);
+
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text.charAt(i + 1) === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }
+
+      if (ch === '"') { inQuotes = true; i++; continue; }
+      if (ch === ',') { row.push(field); field = ''; i++; continue; }
+      if (ch === '\r') { i++; continue; }
+      if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+
+      field += ch; i++;
+    }
+
+    if (field !== '' || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  /* Turns a zone label from the file back into a zone id, so "Mid-range"
+     becomes "midrange". Only used as a fallback - see readImportRow. */
+  function zoneIdFromLabel(text) {
+    var wanted = String(text || '').trim().toLowerCase();
+    for (var i = 0; i < ZONES.length; i++) {
+      if (ZONES[i].label.toLowerCase() === wanted) return ZONES[i].id;
+      if (ZONES[i].id === wanted) return ZONES[i].id;
+    }
+    return null;
+  }
+
+  function readImportRow(cells, ix) {
+    var x = parseFloat(cells[ix.x]);
+    var y = parseFloat(cells[ix.y]);
+    if (!isFinite(x) || !isFinite(y) || !isInsideCourt(x, y)) return null;
+
+    var result = String(cells[ix.result] || '').trim().toLowerCase();
+    var made;
+    if (result === 'make' || result === 'made' || result === 'true' || result === '1') made = true;
+    else if (result === 'miss' || result === 'missed' || result === 'false' || result === '0') made = false;
+    else return null;
+
+    /* The position is the truth. The zone is worked out again from the x/y
+       rather than trusted from the file, so a hand-edited row can never put a
+       shot in a zone its own coordinates disagree with. */
+    var zone = getZone(x, y) || zoneIdFromLabel(cells[ix.zone]);
+    if (!zone) return null;
+
+    var when = ix.t > -1 ? String(cells[ix.t] || '').trim() : '';
+
+    return {
+      id: newId(),
+      x: Math.round(x * 100) / 100,
+      y: Math.round(y * 100) / 100,
+      zone: zone,
+      made: made,
+      t: when || new Date().toISOString(),
+      source: 'import',
+      player: ix.player > -1 ? cleanName(cells[ix.player]) : ''
+    };
+  }
+
+  function importCSVText(text) {
+    var rows = parseCSV(text);
+
+    // Drop blank lines, which spreadsheets love to leave at the end.
+    rows = rows.filter(function (r) {
+      return r.length && r.join('').trim() !== '';
+    });
+
+    if (rows.length < 2) {
+      setStatus('That file does not have any rows in it.', 'error');
+      return;
+    }
+
+    var header = rows[0].map(function (h) { return String(h).trim().toLowerCase(); });
+    var ix = {
+      player: header.indexOf('player'),
+      zone:   header.indexOf('zone'),
+      result: header.indexOf('result'),
+      x:      header.indexOf('x_feet'),
+      y:      header.indexOf('y_feet'),
+      t:      header.indexOf('logged_at')
+    };
+
+    if (ix.result === -1 || ix.x === -1 || ix.y === -1) {
+      setStatus('That does not look like a shot chart CSV. It needs ' +
+                'result, x_feet and y_feet columns.', 'error');
+      return;
+    }
+
+    if (rows.length - 1 > MAX_IMPORT_ROWS) {
+      setStatus('That file has more than ' + MAX_IMPORT_ROWS +
+                ' rows, which is more than one session. Nothing was imported.', 'error');
+      return;
+    }
+
+    var good = [];
+    var skipped = 0;
+
+    for (var i = 1; i < rows.length; i++) {
+      var shot = readImportRow(rows[i], ix);
+      if (shot) good.push(shot); else skipped++;
+    }
+
+    if (!good.length) {
+      setStatus('Could not read any shots out of that file' +
+                (skipped ? ', and ' + skipped + ' ' + (skipped === 1 ? 'row' : 'rows') +
+                 ' did not look right' : '') + '. Nothing was imported.', 'error');
+      return;
+    }
+
+    applyImportedShots(good, skipped);
+  }
+
+  /* Shots are filed under the player named in the CSV. A name that already
+     exists gets the shots added to it; a new name becomes a new player. With
+     no player column at all, everything lands on whoever is on screen. */
+  function applyImportedShots(shots, skipped) {
+    var byName = {};
+    var order = [];
+
+    for (var i = 0; i < shots.length; i++) {
+      var key = shots[i].player || '\u0000current';
+      if (!byName[key]) { byName[key] = []; order.push(key); }
+      delete shots[i].player;
+      byName[key].push(shots[i]);
+    }
+
+    var added = 0;
+    var createdNames = [];
+    var firstId = null;
+
+    for (var j = 0; j < order.length; j++) {
+      var name = order[j];
+      var list = byName[name];
+      var target;
+
+      if (name === '\u0000current') {
+        target = activePlayer();
+      } else {
+        target = null;
+        for (var k = 0; k < state.players.length; k++) {
+          if (state.players[k].name.toLowerCase() === name.toLowerCase()) target = state.players[k];
+        }
+        if (!target) {
+          target = makePlayer(name);
+          state.players.push(target);
+          createdNames.push(target.name);
+        }
+      }
+
+      if (!target) continue;
+
+      for (var m = 0; m < list.length; m++) target.shots.push(list[m]);
+      added += list.length;
+      if (!firstId) firstId = target.id;
+    }
+
+    if (firstId) setActivePlayer(firstId);
+
+    saveEverything();
+    fillPlayerSelect();
+    render();
+    refreshButtons();
+
+    var message = 'Imported ' + added + ' ' + (added === 1 ? 'shot' : 'shots');
+    if (createdNames.length) {
+      message += ', adding ' + (createdNames.length === 1 ? 'a new player: ' : 'new players: ') +
+                 createdNames.join(', ');
+    }
+    message += '.';
+    if (skipped) {
+      message += ' Skipped ' + skipped + ' ' + (skipped === 1 ? 'row' : 'rows') +
+                 ' that did not look right.';
+    }
+
+    setStatus(message);
+  }
+
+  function handleImportFile(file) {
+    if (!file) return;
+
+    if (typeof window.FileReader !== 'function') {
+      setStatus('This browser cannot read files, so importing is not available here.', 'error');
+      return;
+    }
+
+    var reader = new FileReader();
+
+    reader.onload = function () {
+      try {
+        importCSVText(String(reader.result));
+      } catch (err) {
+        setStatus('Something went wrong reading that file, so nothing was imported.', 'error');
+      }
+    };
+
+    reader.onerror = function () {
+      setStatus('That file could not be read. Nothing was imported.', 'error');
+    };
+
+    reader.readAsText(file);
+  }
+
   function exportCSV() {
     if (state.shots.length === 0) {
       setStatus('There are no shots to export yet.');
@@ -1429,6 +1658,7 @@
   var nameError = document.getElementById('name-error');
   var nameSaveBtn = document.getElementById('name-save');
   var nameCancelBtn = document.getElementById('name-cancel');
+  var importInput = document.getElementById('import-file');
 
   function refreshButtons() {
     var empty = state.shots.length === 0;
@@ -1487,6 +1717,14 @@
   undoBtn.addEventListener('click', undoLastShot);
   clearBtn.addEventListener('click', clearSession);
   exportBtn.addEventListener('click', exportCSV);
+
+  importInput.addEventListener('change', function (event) {
+    var file = event.target.files && event.target.files[0];
+    handleImportFile(file);
+    /* Cleared so picking the SAME file again still fires a change event -
+       otherwise a second import of the same file looks like a dead button. */
+    event.target.value = '';
+  });
 
   // ---- players ----
   playerSelect.addEventListener('change', function (event) {
